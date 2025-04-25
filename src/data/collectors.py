@@ -101,13 +101,26 @@ class FIICollector(BaseCollector):
     """Collect FII/DII data"""
     
     async def fetch(self, start_date: str, end_date: str) -> pd.DataFrame:
-        """Fetch FII/DII data from NSE"""
-        # Implementation for FII data collection
-        pass
+        """Fetch FII/DII data from NSE.
+        Returns an empty but well-formed DataFrame on failure to avoid breaking the pipeline.
+        """
+        try:
+            # Placeholder: implement actual fetch from NSE/BSE or other data source
+            # Schema kept minimal for downstream joins/feature engineering if added later
+            columns = ['date', 'fii_net_buy_sell', 'dii_net_buy_sell']
+            df = pd.DataFrame(columns=columns)
+            df['date'] = pd.to_datetime(df['date'])
+            return df
+        except Exception as e:
+            logger.error(f"Error fetching FII/DII data: {e}")
+            return pd.DataFrame(columns=['date', 'fii_net_buy_sell', 'dii_net_buy_sell'])
     
     def validate(self, df: pd.DataFrame) -> bool:
-        # Validation logic
-        pass
+        required_cols = ['date', 'fii_net_buy_sell', 'dii_net_buy_sell']
+        if not all(col in df.columns for col in required_cols):
+            logger.warning("FII/DII data missing expected columns; proceeding without it")
+            return False
+        return True
 
 class DataPipeline:
     """Orchestrate data collection from multiple sources"""
@@ -120,10 +133,16 @@ class DataPipeline:
         """Collect from all sources concurrently"""
         logger.info(f"Starting data collection for {len(symbols)} symbols")
         
-        price_data, fii_data = await asyncio.gather(
-            self.nse_collector.fetch(symbols, start_date, end_date),
-            self.fii_collector.fetch(start_date, end_date)
-        )
+        try:
+            price_task = self.nse_collector.fetch(symbols, start_date, end_date)
+            fii_task = self.fii_collector.fetch(start_date, end_date)
+            price_data, fii_data = await asyncio.gather(price_task, fii_task)
+        except Exception as e:
+            logger.error(f"Data collection error: {e}")
+            # Ensure we at least return price data if available
+            if 'price_data' not in locals() or not isinstance(price_data, pd.DataFrame):
+                price_data = pd.DataFrame()
+            fii_data = pd.DataFrame(columns=['date', 'fii_net_buy_sell', 'dii_net_buy_sell'])
         
         return {
             'prices': price_data,
