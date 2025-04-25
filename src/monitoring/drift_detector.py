@@ -6,6 +6,7 @@ import numpy as np
 from scipy.stats import ks_2samp
 from loguru import logger
 import json
+import os
 
 class DriftDetector:
     """Detect distribution drift in features"""
@@ -50,6 +51,7 @@ class DriftDetector:
                     logger.warning(f"Drift detected in {col}: p-value={pvalue:.4f}")
         
         # Save results
+        os.makedirs('logs', exist_ok=True)
         with open('logs/drift_results.json', 'w') as f:
             json.dump({
                 'timestamp': pd.Timestamp.now().isoformat(),

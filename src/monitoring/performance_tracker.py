@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict
 from loguru import logger
 import sqlite3
+import numpy as np
 
 class PerformanceTracker:
     """Track predictions and actual outcomes"""
