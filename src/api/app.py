@@ -5,6 +5,7 @@ from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import pandas as pd
+import numpy as np
 from typing import List, Dict
 from datetime import datetime, timedelta
 import mlflow
@@ -39,9 +40,19 @@ async def load_model():
     model_uri = "models:/stock_predictor/production"
     
     try:
-        model = mlflow.sklearn.load_model(model_uri)
-        # Load feature columns from model metadata
-        feature_cols = model.feature_name_  # For LightGBM
+        # Prefer LightGBM flavor when available
+        try:
+            import mlflow.lightgbm
+            model = mlflow.lightgbm.load_model(model_uri)
+        except Exception:
+            # Fallback to sklearn flavor
+            model = mlflow.sklearn.load_model(model_uri)
+        # Load feature columns from LightGBM Booster if available
+        try:
+            feature_cols = list(model.feature_name())
+        except Exception:
+            # Fallback: try attribute used by some wrappers
+            feature_cols = list(getattr(model, 'feature_name_', []))
         
         performance_tracker = PerformanceTracker()
         drift_detector = DriftDetector()
@@ -92,6 +103,7 @@ async def predict(
         # Make predictions
         X = latest_df[feature_cols]
         predictions = model.predict(X)
+        # LightGBM multiclass returns probs per class in order [0,1,2]
         pred_classes = np.argmax(predictions, axis=1) - 1
         pred_probs = np.max(predictions, axis=1)
         
