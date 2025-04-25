@@ -64,12 +64,19 @@ class NSECollector(BaseCollector):
         df['date'] = pd.to_datetime(df['CH_TIMESTAMP'])
         df.rename(columns={
             'CH_OPENING_PRICE': 'open',
+            'CH_TRADE_HIGH_PRICE': 'high',
+            'CH_TRADE_LOW_PRICE': 'low',
             'CH_CLOSING_PRICE': 'close',
             'CH_TOT_TRADED_QTY': 'volume',
             'DELIV_QTY': 'delivery_qty',
             'DELIV_PER': 'delivery_percentage'
         }, inplace=True)
-        return df[['symbol', 'date', 'open', 'close', 'volume', 
+        # Ensure high/low exist; default to close if missing
+        if 'high' not in df.columns:
+            df['high'] = df.get('close', pd.NA)
+        if 'low' not in df.columns:
+            df['low'] = df.get('close', pd.NA)
+        return df[['symbol', 'date', 'open', 'high', 'low', 'close', 'volume', 
                    'delivery_qty', 'delivery_percentage']]
     
     def validate(self, df: pd.DataFrame) -> bool:

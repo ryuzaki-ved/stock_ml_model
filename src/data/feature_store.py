@@ -54,13 +54,16 @@ class FeatureEngineer:
             df.loc[group.index, 'bb_lower'] = lower
             df.loc[group.index, 'bb_position'] = (group['close'] - lower) / (upper - lower)
             
-            # ATR (volatility)
-            df.loc[group.index, 'atr_14'] = talib.ATR(
-                group['high'].values, 
-                group['low'].values, 
-                group['close'].values, 
-                timeperiod=14
-            )
+            # ATR (volatility) – guard if high/low missing
+            if 'high' in group.columns and 'low' in group.columns:
+                df.loc[group.index, 'atr_14'] = talib.ATR(
+                    group['high'].values, 
+                    group['low'].values, 
+                    group['close'].values, 
+                    timeperiod=14
+                )
+            else:
+                df.loc[group.index, 'atr_14'] = np.nan
             
             # Moving averages
             df.loc[group.index, 'sma_20'] = talib.SMA(group['close'].values, timeperiod=20)
