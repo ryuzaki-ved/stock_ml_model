@@ -3,6 +3,7 @@ Model training pipeline with MLflow tracking
 """
 import mlflow
 import mlflow.sklearn
+import mlflow.lightgbm
 from typing import Dict, Any
 import pandas as pd
 import numpy as np
@@ -67,8 +68,19 @@ class ModelTrainer:
             # Train final model on all data
             final_model = self._train_lgbm(X, y)
             
-            # Log model
-            mlflow.sklearn.log_model(final_model, "model")
+            # Log model with LightGBM flavor for consistent loading in API
+            mlflow.lightgbm.log_model(final_model, "model")
+
+            # Optionally register the model to the registry for serving
+            try:
+                run = mlflow.active_run()
+                if run is not None:
+                    model_uri = f"runs:/{run.info.run_id}/model"
+                    registered_model_name = self.config.get('registered_model_name', 'stock_predictor')
+                    result = mlflow.register_model(model_uri=model_uri, name=registered_model_name)
+                    logger.info(f"Model registered: name={registered_model_name}, version={result.version}")
+            except Exception as e:
+                logger.warning(f"Skipping model registration: {e}")
             
             # Feature importance
             self._log_feature_importance(final_model, feature_cols)
