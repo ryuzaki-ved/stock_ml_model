@@ -1,0 +1,23 @@
+mlflow_uri: sqlite:///mlflow.db
+experiment_name: stock_prediction
+registered_model_name: stock_predictor
+
+data:
+  lookback_days: 400
+  symbols_default:
+    - RELIANCE
+    - TCS
+    - INFY
+
+model_params:
+  objective: multiclass
+  num_class: 3
+  metric: multi_logloss
+  boosting_type: gbdt
+  num_leaves: 31
+  learning_rate: 0.05
+  feature_fraction: 0.9
+
+retrain:
+  lookback_days: 400
+

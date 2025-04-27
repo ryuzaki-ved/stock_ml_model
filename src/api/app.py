@@ -10,6 +10,7 @@ from typing import List, Dict
 from datetime import datetime, timedelta
 import mlflow
 from loguru import logger
+import os
 
 from .schemas import PredictionRequest, PredictionResponse, PerformanceMetrics
 from ..monitoring.performance_tracker import PerformanceTracker
@@ -151,5 +152,59 @@ async def trigger_retrain(background_tasks: BackgroundTasks):
 async def retrain_model():
     """Retrain model with latest data"""
     logger.info("Starting model retraining...")
-    # Implementation for retraining
-    pass
+    try:
+        # Load configuration (fallback defaults)
+        from ..utils.config import load_config
+        try:
+            config = load_config()
+        except Exception:
+            config = {
+                'mlflow_uri': os.getenv('MLFLOW_TRACKING_URI', 'sqlite:///mlflow.db'),
+                'experiment_name': 'stock_prediction',
+                'registered_model_name': 'stock_predictor',
+                'model_params': {
+                    'objective': 'multiclass',
+                    'num_class': 3,
+                    'metric': 'multi_logloss'
+                },
+                'retrain': {
+                    'lookback_days': 400
+                }
+            }
+
+        # Collect recent data
+        from ..data.collectors import DataPipeline
+        from ..data.feature_store import FeatureEngineer
+        from ..training.trainer import ModelTrainer
+        
+        pipeline = DataPipeline()
+        end_date = datetime.now().strftime("%Y-%m-%d")
+        start_date = (datetime.now() - timedelta(days=config.get('retrain', {}).get('lookback_days', 400))).strftime("%Y-%m-%d")
+
+        # Choose symbols: reuse recent prediction symbols if available, else a default set
+        # For simplicity, train on top symbols stored in predictions DB
+        try:
+            symbols_df = pd.read_sql("SELECT DISTINCT symbol FROM predictions LIMIT 50", performance_tracker.conn)
+            symbols = symbols_df['symbol'].tolist() if len(symbols_df) else ['RELIANCE','TCS','INFY']
+        except Exception:
+            symbols = ['RELIANCE','TCS','INFY']
+
+        data = await pipeline.collect_all(symbols, start_date, end_date)
+
+        engineer = FeatureEngineer({})
+        df = engineer.create_features(data['prices'])
+        df = engineer.create_target(df)
+        df = df.dropna()
+
+        if len(df) < 1000:
+            logger.warning("Not enough data to retrain; skipping")
+            return
+
+        trainer = ModelTrainer(config)
+        result = trainer.train(df, model_type='lgbm')
+
+        # After registration, refresh in-memory model for serving
+        await load_model()
+        logger.info("Retraining complete and model reloaded for serving")
+    except Exception as e:
+        logger.error(f"Retrain failed: {e}")
