@@ -65,14 +65,55 @@ class PerformanceTracker:
         if len(df) == 0:
             return
         
-        # Fetch actual price movements
-        from ..data.collectors import NSECollector
-        collector = NSECollector()
-        
-        for _, row in df.iterrows():
-            # Get actual price movement
-            # ... implementation ...
-            pass
+        # Fetch actual price movements (simplified: next-day close vs current close)
+        try:
+            from ..data.collectors import NSECollector
+            import asyncio
+            collector = NSECollector()
+            
+            updates = []
+            for _, row in df.iterrows():
+                symbol = row['symbol']
+                start_date = pd.to_datetime(row['predicted_at']).strftime('%Y-%m-%d')
+                end_date = (pd.to_datetime(row['predicted_at']) + timedelta(days=2)).strftime('%Y-%m-%d')
+                
+                async def fetch_symbol():
+                    return await collector.fetch([symbol], start_date, end_date)
+                
+                try:
+                    prices = asyncio.run(fetch_symbol())
+                except RuntimeError:
+                    # Already running event loop (e.g., in async context) — fallback to direct loop
+                    loop = asyncio.get_event_loop()
+                    prices = loop.run_until_complete(fetch_symbol())
+                
+                if len(prices) < 2:
+                    continue
+                prices = prices.sort_values('date')
+                current_close = prices.iloc[0]['close']
+                next_close = prices.iloc[-1]['close']
+                actual_return = (next_close / current_close) - 1.0
+                if actual_return > 0:
+                    actual_outcome = 1
+                elif actual_return < 0:
+                    actual_outcome = -1
+                else:
+                    actual_outcome = 0
+                updates.append((actual_outcome, float(actual_return), datetime.now(), int(row['id'])))
+            
+            if updates:
+                self.conn.executemany(
+                    """
+                    UPDATE predictions
+                    SET actual_outcome = ?, actual_return = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    updates
+                )
+                self.conn.commit()
+                logger.info(f"Updated actual outcomes for {len(updates)} predictions")
+        except Exception as e:
+            logger.error(f"Failed to update actual outcomes: {e}")
     
     def get_metrics(self, days: int = 30) -> Dict:
         """Calculate performance metrics"""
@@ -107,3 +148,20 @@ class PerformanceTracker:
             'period_start': df['predicted_at'].min(),
             'period_end': df['predicted_at'].max()
         }
+
+    def get_history(self, symbol: str = None, days: int = 30):
+        """Return historical predictions (optionally filtered by symbol)"""
+        cutoff_date = datetime.now() - timedelta(days=days)
+        params = [cutoff_date]
+        base_query = """
+            SELECT symbol, prediction, confidence, signal, predicted_at, actual_outcome, actual_return
+            FROM predictions
+            WHERE predicted_at > ?
+        """
+        if symbol:
+            base_query += " AND symbol = ?"
+            params.append(symbol)
+        base_query += " ORDER BY predicted_at DESC"
+        df = pd.read_sql(base_query, self.conn, params=tuple(params))
+        records = df.to_dict(orient='records') if len(df) else []
+        return records
